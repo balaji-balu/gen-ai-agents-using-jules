@@ -117,8 +117,11 @@ The `control-center` exposes the following API endpoints:
 -   `GET /api/v1/deployments?agent_id=<id>`: List deployments for a specific agent.
 
 ## Roadmap
+- app profile definition (follow margo guidelines)
 - openapi spec
 - security
     - mTLS between agent and cc
-    - user auth and authorization (rbac/multitenancy), 
+    - user auth and authorization (rbac/multitenancy),
+    - certificates
+- talos based kubernetes
 - harbor, local container registry
