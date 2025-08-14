@@ -28,3 +28,7 @@ go.work.sum
 
 # Log files
 *.log
+
+# Project-specific binaries
+/control-center/control-center
+/cctl/cctl

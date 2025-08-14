@@ -9,16 +9,6 @@ services:
     networks:
       - edge-net
 
-  agent:
-    build:
-      context: ./agent
-    depends_on:
-      - control-center
-    environment:
-      - CONTROL_CENTER_ADDR=http://control-center:8080
-    networks:
-      - edge-net
-
 networks:
   edge-net:
     driver: bridge

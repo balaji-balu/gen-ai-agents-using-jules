@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -18,18 +19,17 @@ const (
 	defaultControlCenterAddress = "http://localhost:8080"
 )
 
-// Agent matches the structure defined in the control-center.
-type Agent struct {
-	ID       string    `json:"id"`
-	Address  string    `json:"address"`
-	LastSeen time.Time `json:"last_seen"`
-	Status   string    `json:"status"`
+// Cluster matches the structure defined in the control-center.
+type Cluster struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Kubeconfig string `json:"kubeconfig"`
 }
 
 // Deployment matches the structure defined in the control-center.
 type Deployment struct {
 	ID        string    `json:"id"`
-	AgentID   string    `json:"agent_id"`
+	ClusterID string    `json:"cluster_id"`
 	ImageURL  string    `json:"image_url"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
@@ -42,8 +42,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
-	case "agents":
-		handleAgentsCmd(os.Args[2:])
+	case "clusters":
+		handleClustersCmd(os.Args[2:])
 	case "deploy":
 		handleDeployCmd(os.Args[2:])
 	default:
@@ -53,47 +53,111 @@ func main() {
 	}
 }
 
-func handleAgentsCmd(args []string) {
-	if len(args) < 1 || args[0] != "list" {
-		fmt.Println("Usage: cctl agents list")
+func handleClustersCmd(args []string) {
+	if len(args) < 1 {
+		printUsage()
 		os.Exit(1)
 	}
-	listAgents()
+
+	switch args[0] {
+	case "list":
+		listClusters()
+	case "add":
+		addClusterCmd := flag.NewFlagSet("add", flag.ExitOnError)
+		name := addClusterCmd.String("name", "", "The name of the cluster.")
+		kubeconfigPath := addClusterCmd.String("kubeconfig", "", "Path to the kubeconfig file.")
+		addClusterCmd.Parse(args[1:])
+
+		if *name == "" || *kubeconfigPath == "" {
+			fmt.Println("Error: --name and --kubeconfig flags are required for add command.")
+			addClusterCmd.Usage()
+			os.Exit(1)
+		}
+		addCluster(*name, *kubeconfigPath)
+	default:
+		fmt.Printf("Unknown subcommand for 'clusters': %s\n", args[0])
+		printUsage()
+		os.Exit(1)
+	}
 }
 
 func handleDeployCmd(args []string) {
 	deployCmd := flag.NewFlagSet("deploy", flag.ExitOnError)
-	agentID := deployCmd.String("agent", "", "The ID of the agent to deploy to.")
+	clusterID := deployCmd.String("cluster", "", "The ID of the cluster to deploy to.")
 	imageURL := deployCmd.String("image", "", "The URL of the container image to deploy.")
 	deployCmd.Parse(args)
 
-	if *agentID == "" || *imageURL == "" {
-		fmt.Println("Error: --agent and --image flags are required for deploy command.")
+	if *clusterID == "" || *imageURL == "" {
+		fmt.Println("Error: --cluster and --image flags are required for deploy command.")
 		deployCmd.Usage()
 		os.Exit(1)
 	}
-	deployWorkload(*agentID, *imageURL)
+	deployWorkload(*clusterID, *imageURL)
 }
 
 func printUsage() {
 	fmt.Println("Usage: cctl <command> [arguments]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  agents list          List all registered agents")
-	fmt.Println("  deploy               Deploy a new workload to an agent")
+	fmt.Println("  clusters list          List all registered clusters")
+	fmt.Println("  clusters add           Register a new cluster")
+	fmt.Println("  deploy                 Deploy a new workload to a cluster")
+	fmt.Println("\nCluster Add arguments:")
+	fmt.Println("  --name <name>          Name of the cluster")
+	fmt.Println("  --kubeconfig <path>    Path to the kubeconfig file")
 	fmt.Println("\nDeploy arguments:")
-	fmt.Println("  --agent <id>         ID of the agent")
-	fmt.Println("  --image <url>        URL of the container image")
+	fmt.Println("  --cluster <id>         ID of the cluster")
+	fmt.Println("  --image <url>          URL of the container image")
 }
 
-func deployWorkload(agentID, imageURL string) {
+func addCluster(name, kubeconfigPath string) {
+	addr := os.Getenv("CONTROL_CENTER_ADDR")
+	if addr == "" {
+		addr = defaultControlCenterAddress
+	}
+
+	kubeconfigBytes, err := os.ReadFile(kubeconfigPath)
+	if err != nil {
+		log.Fatalf("Failed to read kubeconfig file: %v", err)
+	}
+	kubeconfigB64 := base64.StdEncoding.EncodeToString(kubeconfigBytes)
+
+	clusterData := map[string]string{
+		"name":       name,
+		"kubeconfig": kubeconfigB64,
+	}
+	jsonData, err := json.Marshal(clusterData)
+	if err != nil {
+		log.Fatalf("Failed to marshal cluster data: %v", err)
+	}
+
+	resp, err := http.Post(fmt.Sprintf("%s/api/v1/clusters", addr), "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Fatalf("Failed to send cluster registration request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		log.Fatalf("Cluster registration failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var cluster Cluster
+	if err := json.NewDecoder(resp.Body).Decode(&cluster); err != nil {
+		log.Fatalf("Failed to decode cluster response: %v", err)
+	}
+
+	fmt.Printf("Cluster '%s' registered successfully with ID: %s\n", cluster.Name, cluster.ID)
+}
+
+func deployWorkload(clusterID, imageURL string) {
 	addr := os.Getenv("CONTROL_CENTER_ADDR")
 	if addr == "" {
 		addr = defaultControlCenterAddress
 	}
 
 	deployData := map[string]string{
-		"agent_id":  agentID,
-		"image_url": imageURL,
+		"cluster_id": clusterID,
+		"image_url":  imageURL,
 	}
 	jsonData, err := json.Marshal(deployData)
 	if err != nil {
@@ -118,19 +182,18 @@ func deployWorkload(agentID, imageURL string) {
 
 	fmt.Printf("Deployment created successfully!\n")
 	fmt.Printf("  ID: %s\n", deployment.ID)
-	fmt.Printf("  Agent ID: %s\n", deployment.AgentID)
+	fmt.Printf("  Cluster ID: %s\n", deployment.ClusterID)
 	fmt.Printf("  Image: %s\n", deployment.ImageURL)
 	fmt.Printf("  Status: %s\n", deployment.Status)
 }
 
-// listAgents fetches the list of agents from the control center and prints them in a table.
-func listAgents() {
+func listClusters() {
 	addr := os.Getenv("CONTROL_CENTER_ADDR")
 	if addr == "" {
 		addr = defaultControlCenterAddress
 	}
 
-	resp, err := http.Get(fmt.Sprintf("%s/api/v1/agents", addr))
+	resp, err := http.Get(fmt.Sprintf("%s/api/v1/clusters", addr))
 	if err != nil {
 		log.Fatalf("Fatal: Failed to connect to control center: %v", err)
 	}
@@ -140,20 +203,17 @@ func listAgents() {
 		log.Fatalf("Error: Control center returned non-OK status: %s", resp.Status)
 	}
 
-	var agents []*Agent
-	if err := json.NewDecoder(resp.Body).Decode(&agents); err != nil {
+	var clusters []*Cluster
+	if err := json.NewDecoder(resp.Body).Decode(&clusters); err != nil {
 		log.Fatalf("Fatal: Failed to decode response from control center: %v", err)
 	}
 
-	// Use the standard library's tabwriter to format the output.
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "ID\tADDRESS\tSTATUS\tLAST SEEN (UTC)")
-	for _, agent := range agents {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			agent.ID,
-			agent.Address,
-			agent.Status,
-			agent.LastSeen.Format(time.RFC3339),
+	fmt.Fprintln(w, "ID\tNAME")
+	for _, cluster := range clusters {
+		fmt.Fprintf(w, "%s\t%s\n",
+			cluster.ID,
+			cluster.Name,
 		)
 	}
 	w.Flush()
