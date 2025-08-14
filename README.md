@@ -118,5 +118,7 @@ The `control-center` exposes the following API endpoints:
 
 ## Roadmap
 - openapi spec
-- mTLS between agent and cc
+- security
+    - mTLS between agent and cc
+    - user auth and authorization (rbac/multitenancy), 
 - harbor, local container registry
