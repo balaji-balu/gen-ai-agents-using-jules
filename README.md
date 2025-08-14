@@ -115,3 +115,8 @@ The `control-center` exposes the following API endpoints:
 -   `POST /api/v1/heartbeat`: Send a heartbeat from an agent.
 -   `POST /api/v1/deployments`: Create a new deployment.
 -   `GET /api/v1/deployments?agent_id=<id>`: List deployments for a specific agent.
+
+## Roadmap
+- openapi spec
+- mTLS between agent and cc
+- harbor, local container registry
