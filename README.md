@@ -124,4 +124,7 @@ The `control-center` exposes the following API endpoints:
     - user auth and authorization (rbac/multitenancy),
     - certificates
 - talos based kubernetes
-- harbor, local container registry
+- local container registry (at the control center)
+    - at the edge, Caching Docker Registry Proxies
+- ci/cd (gitlab, argocd)
+- 
